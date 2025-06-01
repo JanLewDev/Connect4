@@ -229,12 +229,24 @@ class Player:
 
     def __init__(self, max_depth: int = 5) -> None:
         self.max_depth = max_depth
-        self.transposition_table: dict[int, tuple[int, int]] = {}
+        # Transposition Table maps hash -> (value, depth, flag, best_move)
+        # flag ∈ {"EXACT", "LOWER", "UPPER"}
+        self.transposition_table: dict[int, tuple[int, int, str, int | None]] = {}
 
     @staticmethod
-    def order_moves(moves: list[int], cols: int) -> list[int]:
-        """Simple rule of choosing the moves closer to the centre first."""
-        return sorted(moves, key=lambda x: x if x < cols // 2 else cols - 1 - x, reverse=True)
+    def _order_moves_base(moves: list[int], cols: int) -> list[int]:
+        """Base ordering by proximity to center column."""
+        center = cols // 2
+        return sorted(moves, key=lambda x: abs(x - center))
+
+    def order_moves(self, moves: list[int], cols: int, stored_move: int | None) -> list[int]:
+        """Order moves, placing stored_move first if available, then by proximity to center."""
+        if stored_move is not None and stored_move in moves:
+            remaining = [m for m in moves if m != stored_move]
+            ordered_remaining = self._order_moves_base(remaining, cols)
+            return [stored_move] + ordered_remaining
+        else:
+            return self._order_moves_base(moves, cols)
 
     def min_max(self, _game: Game, depth: int, alpha: int, beta: int, maximizing: bool) \
             -> tuple[int, int | None]:
@@ -243,9 +255,16 @@ class Player:
         current_hash = _game.bitboard.current_hash
         # Check transposition table
         if current_hash in self.transposition_table:
-            stored_value, stored_depth = self.transposition_table[current_hash]
+            stored_value, stored_depth, stored_flag, stored_move = self.transposition_table[current_hash]
             if stored_depth >= depth:
-                return stored_value, None
+                if stored_flag == "EXACT":
+                    return stored_value, stored_move
+                if stored_flag == "LOWER" and maximizing and stored_value >= beta:
+                    return stored_value, stored_move
+                if stored_flag == "UPPER" and not maximizing and stored_value <= alpha:
+                    return stored_value, stored_move
+        else:
+            stored_move = None
 
         _is_terminal, _turn = _game.bitboard.is_terminal()
         if depth == 0 or _is_terminal:
@@ -257,40 +276,60 @@ class Player:
                 return 0, None
             score = _game.eval()
             # Store in transposition table
-            self.transposition_table[current_hash] = (score, depth)
+            self.transposition_table[current_hash] = (score, depth, "EXACT", None)
             return score, None
-        moves = self.order_moves(_game.bitboard.list_moves(), _game.n_columns)
+        raw_moves = _game.bitboard.list_moves()
+        moves = self.order_moves(raw_moves, _game.n_columns, stored_move)
         best_move = None
         if maximizing:
             value = INT_MIN
-            for _move in moves:
-                _game.bitboard.make_move(_move)
-                new_value, _ = self.min_max(_game, depth-1, alpha, beta, False)
+            flag: str = "UPPER"  # Assume upper-bound until proven otherwise
+            for move in moves:
+                _game.bitboard.make_move(move)
+                new_value, _ = self.min_max(_game, depth - 1, alpha, beta, False)
                 _game.bitboard.undo_move()
                 if depth == self.max_depth:
-                    print("Ruch:", _move, "Ocena ruchu:",
+                    print("Ruch:", move, "Ocena ruchu:",
                           new_value, "| player X")
                 if new_value > value:
-                    value, best_move = new_value, _move
+                    value = new_value
+                    best_move = move
                 alpha = max(alpha, value)
-            self.transposition_table[current_hash] = (value, depth)
+                if alpha >= beta:
+                    flag = "LOWER"  # Beta-cutoff
+                    break
+            else:
+                # If we never did a cutoff, the value is exact
+                flag = "EXACT"
+
+            # Store in TT
+            self.transposition_table[current_hash] = (value, depth, flag, best_move)
             return value, best_move
 
-        value = INT_MAX
-        for _move in moves:
-            _game.bitboard.make_move(_move)
-            new_value, _ = self.min_max(_game, depth-1, alpha, beta, True)
-            _game.bitboard.undo_move()
-            if depth == self.max_depth:
-                print("Ruch:", _move, "Ocena ruchu:",
-                      new_value, "| player O")
-            if new_value < value:
-                value, best_move = new_value, _move
-            beta = min(beta, value)
-            if beta <= alpha:
-                break
-        self.transposition_table[current_hash] = (value, depth)
-        return value, best_move
+        else:
+            value = INT_MAX
+            flag = "LOWER"  # Assume lower-bound until proven otherwise
+            for move in moves:
+                _game.bitboard.make_move(move)
+                new_value, _ = self.min_max(_game, depth - 1, alpha, beta, True)
+                _game.bitboard.undo_move()
+                if depth == self.max_depth:
+                    print("Ruch:", move, "Ocena ruchu:",
+                          new_value, "| player O")
+                if new_value < value:
+                    value = new_value
+                    best_move = move
+                beta = min(beta, value)
+                if beta <= alpha:
+                    flag = "UPPER"  # Alpha-cutoff
+                    break
+            else:
+                # If we never did a cutoff, the value is exact
+                flag = "EXACT"
+
+            # Store in TT
+            self.transposition_table[current_hash] = (value, depth, flag, best_move)
+            return value, best_move
 
     def make_move(self, _game: Game) -> int | None:
         """Call the min_max function and return the best move."""
@@ -303,8 +342,8 @@ class Player:
 
 def main():
     game = Game()
-    ai_o = Player(max_depth=8)
-    ai_x = Player(max_depth=8)
+    ai_o = Player(max_depth=10)
+    ai_x = Player(max_depth=10)
 
     print("Rozpoczyna się gra AI vs AI")
     print(game.bitboard)
@@ -326,7 +365,6 @@ def main():
         print("------------------------------")
         print()
 
-    turn ^= 1
     if turn == 0:
         print("Wygrywa X!")
     else:
