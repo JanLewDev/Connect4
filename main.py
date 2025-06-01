@@ -1,6 +1,7 @@
 """Connect 4 AI using Minmax with alpha-beta pruning."""
 import sys
-import time
+import cProfile
+import pstats
 
 INT_MAX = sys.maxsize
 INT_MIN = -sys.maxsize
@@ -286,7 +287,7 @@ def print_board(game: Game):
               for c in range(game.n_columns)))
 
 
-if __name__ == '__main__':
+def main():
     game = Game()
     ai_o = Player(max_depth=7)
     ai_x = Player(max_depth=7)
@@ -317,7 +318,6 @@ if __name__ == '__main__':
         assert move is not None
         game.bitboard.make_move(move)
         print(game.bitboard)
-        time.sleep(1)
         print("------------------------------")
         print()
 
@@ -326,3 +326,10 @@ if __name__ == '__main__':
         print("Wygrywa X!")
     else:
         print("Wygrywa O!")
+if __name__ == '__main__':
+    profiler = cProfile.Profile()
+    profiler.enable()
+    main()
+    profiler.disable()
+    stats = pstats.Stats(profiler).sort_stats("cumulative")
+    stats.print_stats(20)
