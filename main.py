@@ -2,10 +2,10 @@
 from sys import maxsize
 import cProfile
 import pstats
+import random
 
 INT_MAX = maxsize
 INT_MIN = -maxsize
-
 
 class BitBoard:
     """Board class for Connect 4."""
@@ -16,6 +16,7 @@ class BitBoard:
     bitboard: list[int]
     __counter: int
     __heights: list[int]  # current height
+    zobrist_table: list[list[list[int]]]
 
     def __init__(self, height: int = 6, width: int = 7, winning_length: int = 4) -> None:
         self.height = height
@@ -26,13 +27,22 @@ class BitBoard:
         self.bitboard = [0] * 2  # We always have two players
         # positions of the next possible move in each column
         self.__heights = [i * (height + 1) for i in range(width)]
+        self.shifts = [1, self.height, self.height + 1, self.height + 2]
+        # Initialize Zobrist table: [player(0/1)][col][row]
+        self.zobrist_table = [[[random.getrandbits(64) for _ in range(height)] for _ in range(width)] for _ in range(2)]
+        self.current_hash = 0
         assert len(self.__heights) == width
 
     def make_move(self, col: int) -> None:
         """Make a move in the column."""
         # assert 0 <= col < self.width
+        row = self.__heights[col] - col * (self.height + 1)
+        player = self.turn()
+        # Update bitboard
         _move: int = 1 << self.__heights[col]
-        self.bitboard[self.turn()] ^= _move
+        self.bitboard[player] ^= _move
+        # Update Zobrist hash
+        self.current_hash ^= self.zobrist_table[player][col][row]
         self.__heights[col] += 1
         self.move_history.append(col)
         self.__counter += 1
@@ -42,16 +52,21 @@ class BitBoard:
         col = self.move_history.pop()
         self.__counter -= 1
         self.__heights[col] -= 1
+        # Determine row index after undo (the position we remove)
+        row = self.__heights[col] - col * (self.height + 1)
+        player = self.turn()
         _move: int = 1 << self.__heights[col]
-        self.bitboard[self.turn()] ^= _move
+        self.bitboard[player] ^= _move
+
+        # Update Zobrist hash
+        self.current_hash ^= self.zobrist_table[player][col][row]
 
     def is_winning(self, bitboard: int | None = None) -> bool:
         """Check if the passed board is winning or the current player has won."""
         if bitboard is None:
             bitboard = self.bitboard[self.turn() ^ 1]
         # corresponding to vertical, diagonal \, horizontal, diagonal /
-        directions = [1, self.height, self.height + 1, self.height + 2]
-        for shift_length in directions:
+        for shift_length in self.shifts:
             copy_bitboard = bitboard
             for i in range(1, self.winning_length):
                 copy_bitboard &= (bitboard >> shift_length * i)
@@ -97,7 +112,6 @@ class BitBoard:
                     row.append(".")
             result.append(f"{i+1:02d} " + "  ".join(row))
         return "\n".join(result) + "\n  " + " ".join([f"{i+1:02d}" for i in range(self.width)])
-
 
 class Game:
     """Game class for Connect 4."""
@@ -148,17 +162,13 @@ class Game:
         # Horizontal: H + 1
         # Diagonal / (up-right): H + 2
         # Diagonal \\ (down-right, effectively): H
-        shifts = [1, H + 1, H + 2, H]
 
         for r_start in range(H):
             for c_start in range(W):
-                for shift in shifts:
+                for shift in self.bitboard.shifts:
                     line_mask = 0
+                    valid = True
 
-                    current_positions = []
-
-                    possible_line = True
-                    bit_r, bit_c = -1, -1
                     for i in range(K):
                         if shift == 1:  # Vertical
                             bit_r, bit_c = r_start + i, c_start
@@ -171,14 +181,13 @@ class Game:
                             bit_r, bit_c = r_start - i, c_start + i
 
                         if not (0 <= bit_r < H and 0 <= bit_c < W):
-                            possible_line = False
+                            valid = False
                             break
 
                         bit_pos = bit_c * (H + 1) + bit_r
                         line_mask |= (1 << bit_pos)
-                        current_positions.append((bit_r, bit_c))
 
-                    if not possible_line or len(current_positions) != K:
+                    if not valid:
                         continue
 
                     x_pieces = self._count_set_bits(
@@ -218,8 +227,9 @@ class Player:
     """Player class for Connect 4."""
     __explored_nodes: int = 0
 
-    def __init__(self, max_depth: int = 7) -> None:
+    def __init__(self, max_depth: int = 5) -> None:
         self.max_depth = max_depth
+        self.transposition_table: dict[int, tuple[int, int]] = {}
 
     @staticmethod
     def order_moves(moves: list[int], cols: int) -> list[int]:
@@ -230,6 +240,13 @@ class Player:
             -> tuple[int, int | None]:
         """Minimax algorithm with alpha-beta pruning."""
         self.__explored_nodes += 1
+        current_hash = _game.bitboard.current_hash
+        # Check transposition table
+        if current_hash in self.transposition_table:
+            stored_value, stored_depth = self.transposition_table[current_hash]
+            if stored_depth >= depth:
+                return stored_value, None
+
         _is_terminal, _turn = _game.bitboard.is_terminal()
         if depth == 0 or _is_terminal:
             if _is_terminal:
@@ -238,7 +255,10 @@ class Player:
                 if _turn == 1:
                     return INT_MIN+1, None
                 return 0, None
-            return _game.eval(), None
+            score = _game.eval()
+            # Store in transposition table
+            self.transposition_table[current_hash] = (score, depth)
+            return score, None
         moves = self.order_moves(_game.bitboard.list_moves(), _game.n_columns)
         best_move = None
         if maximizing:
@@ -253,6 +273,7 @@ class Player:
                 if new_value > value:
                     value, best_move = new_value, _move
                 alpha = max(alpha, value)
+            self.transposition_table[current_hash] = (value, depth)
             return value, best_move
 
         value = INT_MAX
@@ -268,6 +289,7 @@ class Player:
             beta = min(beta, value)
             if beta <= alpha:
                 break
+        self.transposition_table[current_hash] = (value, depth)
         return value, best_move
 
     def make_move(self, _game: Game) -> int | None:
@@ -279,27 +301,10 @@ class Player:
         return _move
 
 
-def print_board(game: Game):
-    symbols = {-1: '.', 0: 'X', 1: 'O'}
-    print(' '.join(map(str, range(game.n_columns))))
-    for r in range(game.n_rows):
-        print(' '.join(symbols[game.board[r][c]]
-              for c in range(game.n_columns)))
-
-
 def main():
     game = Game()
-    ai_o = Player(max_depth=7)
-    ai_x = Player(max_depth=7)
-    game.board = [
-        [-1, -1, -1, -1, -1, -1, -1],
-        [-1, -1, -1, -1, -1, -1, -1],
-        [-1, -1, -1, -1, -1, -1, -1],
-        [-1, -1, -1, -1, -1, -1, -1],
-        [-1, -1, -1, -1, -1, -1, -1],
-        [-1, -1, -1, -1, -1, -1, -1],
-        [-1, -1, -1, -1, -1, -1, -1]
-    ]
+    ai_o = Player(max_depth=8)
+    ai_x = Player(max_depth=8)
 
     print("Rozpoczyna się gra AI vs AI")
     print(game.bitboard)
