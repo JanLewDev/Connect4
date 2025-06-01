@@ -1,10 +1,10 @@
 """Connect 4 AI using Minmax with alpha-beta pruning."""
-import sys
+from sys import maxsize
 import cProfile
 import pstats
 
-INT_MAX = sys.maxsize
-INT_MIN = -sys.maxsize
+INT_MAX = maxsize
+INT_MIN = -maxsize
 
 
 class BitBoard:
@@ -73,7 +73,7 @@ class BitBoard:
         """Check if the board is terminal and return the last move's player."""
         return self.is_winning() or \
             self.__counter == self.height * \
-            self.width, (self.__counter & 1)
+            self.width, (self.turn() ^ 1) # self.turn()?
 
     def turn(self) -> int:
         """Return the current player."""
