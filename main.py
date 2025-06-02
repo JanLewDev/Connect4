@@ -3,6 +3,7 @@ from sys import maxsize
 import cProfile
 import pstats
 import random
+import time
 
 INT_MAX = maxsize
 INT_MIN = -maxsize
@@ -227,8 +228,9 @@ class Player:
     """Player class for Connect 4."""
     __explored_nodes: int = 0
 
-    def __init__(self, max_depth: int = 5) -> None:
+    def __init__(self, max_depth: int = 5, time_limit: float = None) -> None:
         self.max_depth = max_depth
+        self.time_limit = time_limit
         # Transposition Table maps hash -> (value, depth, flag, best_move)
         # flag ∈ {"EXACT", "LOWER", "UPPER"}
         self.transposition_table: dict[int, tuple[int, int, str, int | None]] = {}
@@ -252,8 +254,7 @@ class Player:
             -> tuple[int, int | None]:
         """Minimax algorithm with alpha-beta pruning."""
         self.__explored_nodes += 1
-        bb = _game.bitboard
-        current_hash = bb.current_hash
+        current_hash = _game.bitboard.current_hash
         # Check transposition table
         if current_hash in self.transposition_table:
             stored_value, stored_depth, stored_flag, stored_move = self.transposition_table[current_hash]
@@ -267,7 +268,7 @@ class Player:
         else:
             stored_move = None
 
-        _is_terminal, _turn = bb.is_terminal()
+        _is_terminal, _turn = _game.bitboard.is_terminal()
         if depth == 0 or _is_terminal:
             if _is_terminal:
                 if _turn == 0:
@@ -279,16 +280,16 @@ class Player:
             # Store in transposition table
             self.transposition_table[current_hash] = (score, depth, "EXACT", None)
             return score, None
-        raw_moves = bb.list_moves()
+        raw_moves = _game.bitboard.list_moves()
         moves = self.order_moves(raw_moves, _game.n_columns, stored_move)
         best_move = None
         if maximizing:
             value = INT_MIN
             flag: str = "UPPER"  # Assume upper-bound until proven otherwise
             for move in moves:
-                bb.make_move(move)
+                _game.bitboard.make_move(move)
                 new_value, _ = self.min_max(_game, depth - 1, alpha, beta, False)
-                bb.undo_move()
+                _game.bitboard.undo_move()
                 if depth == self.max_depth:
                     print("Ruch:", move, "Ocena ruchu:",
                           new_value, "| player X")
@@ -311,9 +312,9 @@ class Player:
             value = INT_MAX
             flag = "LOWER"  # Assume lower-bound until proven otherwise
             for move in moves:
-                bb.make_move(move)
+                _game.bitboard.make_move(move)
                 new_value, _ = self.min_max(_game, depth - 1, alpha, beta, True)
-                bb.undo_move()
+                _game.bitboard.undo_move()
                 if depth == self.max_depth:
                     print("Ruch:", move, "Ocena ruchu:",
                           new_value, "| player O")
@@ -333,18 +334,31 @@ class Player:
             return value, best_move
 
     def make_move(self, _game: Game) -> int | None:
-        """Call the min_max function and return the best move."""
+        """Iterative Deepening: incrementally increase depth."""
         self.__explored_nodes = 0
-        _, _move = self.min_max(_game, self.max_depth, INT_MIN, INT_MAX,
-                                not _game.bitboard.turn())
-        print(f"Przeszukanych węzłów: {self.__explored_nodes}")
-        return _move
+        best_move_overall = None
+        start_time = time.time()
 
+        for depth in range(1, self.max_depth + 1):
+            self.transposition_table.clear()
+            value, best_move = self.min_max(_game, depth, INT_MIN, INT_MAX,
+                                            not _game.bitboard.turn())
+            if best_move is not None:
+                best_move_overall = best_move
+
+            print(f"Depth {depth}: Best Move = {best_move}, Score = {value}")
+            # time limit
+            if self.time_limit is not None and (time.time() - start_time) > self.time_limit:
+                break
+            
+
+        print(f"Przeszukanych węzłów: {self.__explored_nodes}")
+        return best_move_overall
 
 def main():
     game = Game()
-    ai_o = Player(max_depth=10)
-    ai_x = Player(max_depth=10)
+    ai_o = Player(max_depth=10, time_limit=5.0)
+    ai_x = Player(max_depth=10, time_limit=5.0)
 
     print("Rozpoczyna się gra AI vs AI")
     print(game.bitboard)
