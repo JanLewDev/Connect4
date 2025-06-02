@@ -134,52 +134,28 @@ class Game:
         self.bitboard = BitBoard(
             height=self.n_rows, width=self.n_columns, winning_length=self.winning_length)
 
-    def _count_set_bits(self, n: int) -> int:
-        """Counts the number of set bits in an integer."""
-        if hasattr(n, "bit_count"):
-            return n.bit_count()
-        count = 0
-        while n > 0:
-            n &= (n - 1)
-            count += 1
-        return count
-
-    def eval(self) -> int:
-        """Evaluate the board using bitboards."""
-        player0_bitboard = self.bitboard.bitboard[0]
-        player1_bitboard = self.bitboard.bitboard[1]
-
-        H = self.bitboard.height
-        W = self.bitboard.width
-        K = self.bitboard.winning_length
-
-        p0_potential_lines = 0
-        p1_potential_lines = 0
-        player0_threats = 0
-        player1_threats = 0
-
-        # Directions for shifts
-        # Vertical: 1
-        # Horizontal: H + 1
-        # Diagonal / (up-right): H + 2
-        # Diagonal \\ (down-right, effectively): H
-
+        H = self.n_rows
+        W = self.n_columns
+        K = self.winning_length
+        shifts = self.bitboard.shifts
+        self.line_masks: list[int] = []
         for r_start in range(H):
             for c_start in range(W):
-                for shift in self.bitboard.shifts:
+                for shift in shifts:
                     line_mask = 0
                     valid = True
-
                     for i in range(K):
-                        if shift == 1:  # Vertical
+                        if shift == 1:
                             bit_r, bit_c = r_start + i, c_start
-                        elif shift == H + 1:  # Horizontal
+                        elif shift == H + 1:
                             bit_r, bit_c = r_start, c_start + i
-                        elif shift == H + 2:  # Diagonal / (up-right)
+                        elif shift == H + 2:
                             bit_r, bit_c = r_start + i, c_start + i
-                        # Diagonal \\ (down-right relative to start)
                         elif shift == H:
                             bit_r, bit_c = r_start - i, c_start + i
+                        else:
+                            valid = False
+                            break
 
                         if not (0 <= bit_r < H and 0 <= bit_c < W):
                             valid = False
@@ -191,36 +167,57 @@ class Game:
                     if not valid:
                         continue
 
-                    x_pieces = self._count_set_bits(
-                        line_mask & player0_bitboard)
-                    o_pieces = self._count_set_bits(
-                        line_mask & player1_bitboard)
-                    empty_spots = K - x_pieces - o_pieces
+                    self.line_masks.append(line_mask)
 
-                    if x_pieces > 0 and o_pieces > 0:
-                        continue
+    def _count_set_bits(self, n: int) -> int:
+        """Counts the number of set bits in an integer."""
+        if hasattr(n, "bit_count"):
+            return n.bit_count()
+        count = 0
+        while n > 0:
+            n &= (n - 1)
+            count += 1
+        return count
 
-                    if o_pieces == 0:
-                        p0_potential_lines += 1
-                        if x_pieces == K - 1 and empty_spots == 1:
-                            player0_threats += 3
-                        elif x_pieces == K - 2 and empty_spots == 2:
-                            player0_threats += 2
-                        elif K >= 3 and x_pieces == K - 3 and empty_spots == 3:
-                            player0_threats += 1
+    def eval(self) -> int:
+        """Przyspieszona wersja funkcji oceniającej przy użyciu wcześniej obliczonych masek."""
+        player0_bb = self.bitboard.bitboard[0]
+        player1_bb = self.bitboard.bitboard[1]
 
-                    if x_pieces == 0:
-                        p1_potential_lines += 1
-                        if o_pieces == K - 1 and empty_spots == 1:
-                            player1_threats += 3
-                        elif o_pieces == K - 2 and empty_spots == 2:
-                            player1_threats += 2
-                        elif K >= 3 and o_pieces == K - 3 and empty_spots == 3:
-                            player1_threats += 1
+        K = self.winning_length
 
-        # Score = (p0_potential_lines - p1_potential_lines) + (player1_threats - player0_threats)
-        score = (p0_potential_lines - p1_potential_lines) + \
-            (player1_threats - player0_threats)
+        p0_potential_lines = 0
+        p1_potential_lines = 0
+        player0_threats = 0
+        player1_threats = 0
+
+        for line_mask in self.line_masks:
+            x_bits = (line_mask & player0_bb).bit_count()
+            o_bits = (line_mask & player1_bb).bit_count()
+            empty = K - x_bits - o_bits
+
+            if x_bits > 0 and o_bits > 0:
+                continue
+
+            if o_bits == 0:
+                p0_potential_lines += 1
+                if x_bits == K - 1 and empty == 1:
+                    player0_threats += 3
+                elif x_bits == K - 2 and empty == 2:
+                    player0_threats += 2
+                elif K >= 3 and x_bits == K - 3 and empty == 3:
+                    player0_threats += 1
+
+            if x_bits == 0:
+                p1_potential_lines += 1
+                if o_bits == K - 1 and empty == 1:
+                    player1_threats += 3
+                elif o_bits == K - 2 and empty == 2:
+                    player1_threats += 2
+                elif K >= 3 and o_bits == K - 3 and empty == 3:
+                    player1_threats += 1
+
+        score = (p0_potential_lines - p1_potential_lines) + (player1_threats - player0_threats)
         return score
 
 
