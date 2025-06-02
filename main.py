@@ -252,7 +252,8 @@ class Player:
             -> tuple[int, int | None]:
         """Minimax algorithm with alpha-beta pruning."""
         self.__explored_nodes += 1
-        current_hash = _game.bitboard.current_hash
+        bb = _game.bitboard
+        current_hash = bb.current_hash
         # Check transposition table
         if current_hash in self.transposition_table:
             stored_value, stored_depth, stored_flag, stored_move = self.transposition_table[current_hash]
@@ -266,7 +267,7 @@ class Player:
         else:
             stored_move = None
 
-        _is_terminal, _turn = _game.bitboard.is_terminal()
+        _is_terminal, _turn = bb.is_terminal()
         if depth == 0 or _is_terminal:
             if _is_terminal:
                 if _turn == 0:
@@ -278,16 +279,16 @@ class Player:
             # Store in transposition table
             self.transposition_table[current_hash] = (score, depth, "EXACT", None)
             return score, None
-        raw_moves = _game.bitboard.list_moves()
+        raw_moves = bb.list_moves()
         moves = self.order_moves(raw_moves, _game.n_columns, stored_move)
         best_move = None
         if maximizing:
             value = INT_MIN
             flag: str = "UPPER"  # Assume upper-bound until proven otherwise
             for move in moves:
-                _game.bitboard.make_move(move)
+                bb.make_move(move)
                 new_value, _ = self.min_max(_game, depth - 1, alpha, beta, False)
-                _game.bitboard.undo_move()
+                bb.undo_move()
                 if depth == self.max_depth:
                     print("Ruch:", move, "Ocena ruchu:",
                           new_value, "| player X")
@@ -310,9 +311,9 @@ class Player:
             value = INT_MAX
             flag = "LOWER"  # Assume lower-bound until proven otherwise
             for move in moves:
-                _game.bitboard.make_move(move)
+                bb.make_move(move)
                 new_value, _ = self.min_max(_game, depth - 1, alpha, beta, True)
-                _game.bitboard.undo_move()
+                bb.undo_move()
                 if depth == self.max_depth:
                     print("Ruch:", move, "Ocena ruchu:",
                           new_value, "| player O")
