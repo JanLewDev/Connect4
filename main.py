@@ -4,9 +4,12 @@ import cProfile
 import pstats
 import random
 import time
+import asyncio
+from typing import AsyncGenerator
 
 INT_MAX = maxsize
 INT_MIN = -maxsize
+
 
 class BitBoard:
     """Board class for Connect 4."""
@@ -30,7 +33,8 @@ class BitBoard:
         self.__heights = [i * (height + 1) for i in range(width)]
         self.shifts = [1, self.height, self.height + 1, self.height + 2]
         # Initialize Zobrist table: [player(0/1)][col][row]
-        self.zobrist_table = [[[random.getrandbits(64) for _ in range(height)] for _ in range(width)] for _ in range(2)]
+        self.zobrist_table = [[[random.getrandbits(64) for _ in range(
+            height)] for _ in range(width)] for _ in range(2)]
         self.current_hash = 0
         assert len(self.__heights) == width
 
@@ -89,7 +93,7 @@ class BitBoard:
         """Check if the board is terminal and return the last move's player."""
         return self.is_winning() or \
             self.__counter == self.height * \
-            self.width, (self.turn() ^ 1) # self.turn()?
+            self.width, (self.turn() ^ 1)  # self.turn()?
 
     def turn(self) -> int:
         """Return the current player."""
@@ -113,6 +117,7 @@ class BitBoard:
                     row.append(".")
             result.append(f"{i+1:02d} " + "  ".join(row))
         return "\n".join(result) + "\n  " + " ".join([f"{i+1:02d}" for i in range(self.width)])
+
 
 class Game:
     """Game class for Connect 4."""
@@ -217,7 +222,8 @@ class Game:
                 elif K >= 3 and o_bits == K - 3 and empty == 3:
                     player1_threats += 1
 
-        score = (p0_potential_lines - p1_potential_lines) + (player1_threats - player0_threats)
+        score = (p0_potential_lines - p1_potential_lines) + \
+            2 * (player1_threats - player0_threats)
         return score
 
 
@@ -225,12 +231,13 @@ class Player:
     """Player class for Connect 4."""
     __explored_nodes: int = 0
 
-    def __init__(self, max_depth: int = 5, time_limit: float = None) -> None:
+    def __init__(self, max_depth: int = 5, time_limit: float = 300.0) -> None:
         self.max_depth = max_depth
         self.time_limit = time_limit
         # Transposition Table maps hash -> (value, depth, flag, best_move)
         # flag ∈ {"EXACT", "LOWER", "UPPER"}
-        self.transposition_table: dict[int, tuple[int, int, str, int | None]] = {}
+        self.transposition_table: dict[int,
+                                       tuple[int, int, str, int | None]] = {}
 
     @staticmethod
     def _order_moves_base(moves: list[int], cols: int) -> list[int]:
@@ -244,17 +251,20 @@ class Player:
             remaining = [m for m in moves if m != stored_move]
             ordered_remaining = self._order_moves_base(remaining, cols)
             return [stored_move] + ordered_remaining
-        else:
-            return self._order_moves_base(moves, cols)
+        return self._order_moves_base(moves, cols)
 
-    def min_max(self, _game: Game, depth: int, alpha: int, beta: int, maximizing: bool) \
-            -> tuple[int, int | None]:
+    async def min_max(self, _game: Game, depth: int, alpha: int, beta: int, maximizing: bool,
+                      start_time: float, time_limit: float) -> tuple[int, int | None]:
         """Minimax algorithm with alpha-beta pruning."""
+        if time.time() - start_time > time_limit:
+            raise asyncio.CancelledError()
+
         self.__explored_nodes += 1
         current_hash = _game.bitboard.current_hash
         # Check transposition table
         if current_hash in self.transposition_table:
-            stored_value, stored_depth, stored_flag, stored_move = self.transposition_table[current_hash]
+            stored_value, stored_depth, stored_flag, stored_move = self.transposition_table[
+                current_hash]
             if stored_depth >= depth:
                 if stored_flag == "EXACT":
                     return stored_value, stored_move
@@ -275,7 +285,8 @@ class Player:
                 return 0, None
             score = _game.eval()
             # Store in transposition table
-            self.transposition_table[current_hash] = (score, depth, "EXACT", None)
+            self.transposition_table[current_hash] = (
+                score, depth, "EXACT", None)
             return score, None
         raw_moves = _game.bitboard.list_moves()
         moves = self.order_moves(raw_moves, _game.n_columns, stored_move)
@@ -285,8 +296,13 @@ class Player:
             flag: str = "UPPER"  # Assume upper-bound until proven otherwise
             for move in moves:
                 _game.bitboard.make_move(move)
-                new_value, _ = self.min_max(_game, depth - 1, alpha, beta, False)
-                _game.bitboard.undo_move()
+                # Make sure to undo the move even if the function raises an error
+                try:
+                    new_value, _ = await self.min_max(
+                        _game, depth - 1, alpha, beta, False, start_time, time_limit)
+                finally:
+                    _game.bitboard.undo_move()
+
                 if depth == self.max_depth:
                     print("Ruch:", move, "Ocena ruchu:",
                           new_value, "| player X")
@@ -302,7 +318,8 @@ class Player:
                 flag = "EXACT"
 
             # Store in TT
-            self.transposition_table[current_hash] = (value, depth, flag, best_move)
+            self.transposition_table[current_hash] = (
+                value, depth, flag, best_move)
             return value, best_move
 
         else:
@@ -310,8 +327,13 @@ class Player:
             flag = "LOWER"  # Assume lower-bound until proven otherwise
             for move in moves:
                 _game.bitboard.make_move(move)
-                new_value, _ = self.min_max(_game, depth - 1, alpha, beta, True)
-                _game.bitboard.undo_move()
+                # Make sure to undo the move even if the function raises an error
+                try:
+                    new_value, _ = await self.min_max(
+                        _game, depth - 1, alpha, beta, True, start_time, time_limit)
+                finally:
+                    _game.bitboard.undo_move()
+
                 if depth == self.max_depth:
                     print("Ruch:", move, "Ocena ruchu:",
                           new_value, "| player O")
@@ -327,10 +349,11 @@ class Player:
                 flag = "EXACT"
 
             # Store in TT
-            self.transposition_table[current_hash] = (value, depth, flag, best_move)
+            self.transposition_table[current_hash] = (
+                value, depth, flag, best_move)
             return value, best_move
 
-    def make_move(self, _game: Game) -> int | None:
+    async def iterative_deepening(self, _game: Game) -> AsyncGenerator[int | None]:
         """Iterative Deepening: incrementally increase depth."""
         self.__explored_nodes = 0
         best_move_overall = None
@@ -338,24 +361,39 @@ class Player:
 
         for depth in range(1, self.max_depth + 1):
             self.transposition_table.clear()
-            value, best_move = self.min_max(_game, depth, INT_MIN, INT_MAX,
-                                            not _game.bitboard.turn())
+            try:
+                value, best_move = await self.min_max(_game, depth, INT_MIN, INT_MAX,
+                                                      not _game.bitboard.turn(), start_time,
+                                                      self.time_limit)
+            except asyncio.CancelledError:
+                print("Timed out!")
+                break
             if best_move is not None:
                 best_move_overall = best_move
 
             print(f"Depth {depth}: Best Move = {best_move}, Score = {value}")
-            # time limit
-            if self.time_limit is not None and (time.time() - start_time) > self.time_limit:
-                break
-            
 
-        print(f"Przeszukanych węzłów: {self.__explored_nodes}")
-        return best_move_overall
+            yield best_move_overall
+
+        print(f"Explored nodes: {self.__explored_nodes}")
+
+    async def make_move_async(self, _game: Game) -> int | None:
+        """Make a move in the time given."""
+        best_move = None
+        async for _move in self.iterative_deepening(_game):
+            best_move = _move
+        return best_move
+
+    def make_move(self, _game: Game) -> int | None:
+        """Makes the async move."""
+        return asyncio.run(self.make_move_async(_game))
+
 
 def main():
+    """The main function."""
     game = Game()
-    ai_o = Player(max_depth=10, time_limit=5.0)
-    ai_x = Player(max_depth=10, time_limit=5.0)
+    ai_o = Player(max_depth=20, time_limit=5)
+    ai_x = Player(max_depth=20, time_limit=5)
 
     print("Rozpoczyna się gra AI vs AI")
     print(game.bitboard)
@@ -365,10 +403,16 @@ def main():
             break
 
         if game.bitboard.turn() == 0:
+            start = time.time()
             move = ai_x.make_move(game)
+            end = time.time()
+            print(f"Czas wykonania: {end - start} sekund")
             print(f"X wybiera kolumnę {move}")
         else:
+            start = time.time()
             move = ai_o.make_move(game)
+            end = time.time()
+            print(f"Czas wykonania: {end - start} sekund")
             print(f"O wybiera kolumnę {move}")
 
         assert move is not None
@@ -381,10 +425,12 @@ def main():
         print("Wygrywa X!")
     else:
         print("Wygrywa O!")
+
+
 if __name__ == '__main__':
-    profiler = cProfile.Profile()
-    profiler.enable()
+    # profiler = cProfile.Profile()
+    # profiler.enable()
     main()
-    profiler.disable()
-    stats = pstats.Stats(profiler).sort_stats("cumulative")
-    stats.print_stats(20)
+    # profiler.disable()
+    # stats = pstats.Stats(profiler).sort_stats("cumulative")
+    # stats.print_stats(20)
