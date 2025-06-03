@@ -224,6 +224,11 @@ class Game:
             2 * (player1_threats - player0_threats)
         return score
 
+    def set_bitboard(self) -> None:
+        """Set the bitboard from the board."""
+        for _move in self.move_history:
+            self.bitboard.make_move(_move[0])
+
 
 class Player:
     """Player class for Connect 4."""
@@ -386,4 +391,6 @@ class Player:
 
     def make_move(self, _game: Game) -> int | None:
         """Makes the async move."""
+        # TODO
+        _game.set_bitboard()
         return asyncio.run(self.make_move_async(_game))
