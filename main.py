@@ -36,8 +36,8 @@ if args.time_limit and len(args.time_limit) >= 1:
 def main():
     """The main function."""
     game = Game(args.rows, args.columns, args.winning_length)
-    ai_o = Player(max_depth=max_depths[0], time_limit=time_limits[0])
-    ai_x = Player(max_depth=max_depths[1], time_limit=time_limits[1])
+    ai_x = Player(max_depth=max_depths[0], time_limit=time_limits[0])
+    ai_o = Player(max_depth=max_depths[1], time_limit=time_limits[1])
 
     print("AI vs AI game starts")
     print("Starting with arguments:")
