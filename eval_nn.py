@@ -3,113 +3,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
-
-class BitBoard:
-    """Board class for Connect 4."""
-    height: int
-    width: int
-    winning_length: int
-    move_history: list[int]
-    bitboard: list[int]
-    counter: int
-    heights: list[int]  # current height
-    zobrist_table: list[list[list[int]]]
-
-    def __init__(self, height: int = 6, width: int = 7, winning_length: int = 4) -> None:
-        self.height = height
-        self.width = width
-        self.winning_length = winning_length
-        self.move_history = []
-        self.counter = 0
-        self.bitboard = [0] * 2  # We always have two players
-        # positions of the next possible move in each column
-        self.heights = [i * (height + 1) for i in range(width)]
-        self.shifts = [1, self.height, self.height + 1, self.height + 2]
-        # Initialize Zobrist table: [player(0/1)][col][row]
-        self.zobrist_table = [[[random.getrandbits(64) for _ in range(
-            height)] for _ in range(width)] for _ in range(2)]
-        self.current_hash = 0
-        assert len(self.heights) == width
-
-    def make_move(self, col: int) -> None:
-        """Make a move in the column."""
-        # assert 0 <= col < self.width
-        row = self.heights[col] - col * (self.height + 1)
-        player = self.turn()
-        # Update bitboard
-        _move: int = 1 << self.heights[col]
-        self.bitboard[player] ^= _move
-        # Update Zobrist hash
-        self.current_hash ^= self.zobrist_table[player][col][row]
-        self.heights[col] += 1
-        self.move_history.append(col)
-        self.counter += 1
-
-    def undo_move(self) -> None:
-        """Undo the last move."""
-        col = self.move_history.pop()
-        self.counter -= 1
-        self.heights[col] -= 1
-        # Determine row index after undo (the position we remove)
-        row = self.heights[col] - col * (self.height + 1)
-        player = self.turn()
-        _move: int = 1 << self.heights[col]
-        self.bitboard[player] ^= _move
-
-        # Update Zobrist hash
-        self.current_hash ^= self.zobrist_table[player][col][row]
-
-    def is_winning(self, bitboard: int | None = None) -> bool:
-        """Check if the passed board is winning or the current player has won."""
-        if bitboard is None:
-            bitboard = self.bitboard[self.turn() ^ 1]
-        # corresponding to vertical, diagonal \, horizontal, diagonal /
-        for shift_length in self.shifts:
-            copy_bitboard = bitboard
-            for i in range(1, self.winning_length):
-                copy_bitboard &= (bitboard >> shift_length * i)
-                if copy_bitboard == 0:
-                    break
-            if copy_bitboard != 0:
-                return True
-        return False
-
-    def list_moves(self) -> list[int]:
-        """List all possible moves."""
-        moves = []
-        for col in range(self.width):
-            if not self.__top_mask(col) & (1 << self.heights[col]):
-                moves.append(col)
-        return moves
-
-    def is_terminal(self) -> tuple[bool, int]:
-        """Check if the board is terminal and return the last move's player."""
-        return self.is_winning() or \
-            self.counter == self.height * \
-            self.width, (self.turn() ^ 1)  # self.turn()?
-
-    def turn(self) -> int:
-        """Return the current player."""
-        return self.counter & 1
-
-    def __top_mask(self, col: int) -> int:
-        """Return the top mask for the column."""
-        return (1 << self.height) << (col * (self.height + 1))
-
-    def __str__(self) -> str:
-        """Return the string representation of the board."""
-        result = []
-        for i in range(self.height - 1, -1, -1):
-            row = []
-            for j in range(self.width):
-                if self.bitboard[0] & (1 << (j * (self.height + 1) + i)):
-                    row.append("X")
-                elif self.bitboard[1] & (1 << (j * (self.height + 1) + i)):
-                    row.append("O")
-                else:
-                    row.append(".")
-            result.append(f"{i+1:02d} " + "  ".join(row))
-        return "\n".join(result) + "\n  " + " ".join([f"{i+1:02d}" for i in range(self.width)])
+from bitboard import BitBoard
+from typing import List, Tuple
 
 class Connect4Dataset(Dataset):
   """Dataset generated using random simulations"""
@@ -192,3 +87,138 @@ class Connect4Dataset(Dataset):
     return self.num_samples
   def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
     return self.positions[idx], torch.tensor(self.labels[idx])
+
+class Connect4NN(nn.Module):
+
+    def __init__(self, height: int = 6, width: int = 7):
+        super().__init__()
+        self.height = height
+        self.width = width
+
+        self.conv1 = nn.Conv2d(
+            in_channels=2, out_channels=128, kernel_size=4, stride=1, padding=1
+        )
+        self.bn1 = nn.BatchNorm2d(128)
+
+        self.conv2 = nn.Conv2d(
+            in_channels=128, out_channels=64, kernel_size=3, stride=1, padding=1
+        )
+        self.bn2 = nn.BatchNorm2d(64)
+
+        flatten_size = 64 * (self.height-1) * (self.width-1)
+
+        self.fc1 = nn.Linear(flatten_size, 256)
+        self.dropout = nn.Dropout(p=0.3)
+        self.fc2 = nn.Linear(256, 1)
+
+        self.tanh = nn.Tanh()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass:
+        x: tensor o kształcie (batch_size, 2, H, W)
+        zwraca tensor o kształcie (batch_size,), z wartościami w [-1,1].
+        """
+
+        x = self.conv1(x) 
+        x = self.bn1(x)
+        x = nn.functional.relu(x)
+
+        x = self.conv2(x)         
+        x = self.bn2(x)
+        x = nn.functional.relu(x)
+
+        x = x.view(x.size(0), -1)  
+
+        x = self.fc1(x)             
+        x = nn.functional.relu(x)
+        x = self.dropout(x)
+
+        x = self.fc2(x)             
+        x = self.tanh(x)            
+        return x.squeeze(1)
+
+if __name__ == "__main__":
+    NUM_SAMPLES = 10000
+    PLAYOUTS = 100
+    BATCH_SIZE = 64
+    EPOCHS = 20
+    LEARNING_RATE = 1e-4
+
+    TRAIN_SPLIT = 0.70
+    VALID_SPLIT = 0.15
+    TEST_SPLIT = 0.15
+
+    dataset = Connect4Dataset(
+        num_samples=NUM_SAMPLES,
+        playouts_per_position=PLAYOUTS,
+        height=6,
+        width=7,
+        winning_length=4,
+    )
+
+    total_size = len(dataset)
+    n_test = int(total_size * TEST_SPLIT)
+    n_valid = int(total_size * VALID_SPLIT)
+    n_train = total_size - n_valid - n_test
+
+    train_set, valid_set, test_set = random_split(
+        dataset, [n_train, n_valid, n_test]
+    )
+
+    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
+    valid_loader = DataLoader(valid_set, batch_size=BATCH_SIZE)
+    test_loader  = DataLoader(test_set,  batch_size=BATCH_SIZE)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = Connect4NN(height=6, width=7).to(device)
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+    for epoch in range(1, EPOCHS + 1):
+        model.train()
+        running_loss = 0.0
+        for boards, targets in train_loader:
+            boards = boards.to(device)      
+            targets = targets.to(device)    
+
+            optimizer.zero_grad()
+            outputs = model(boards)         
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item() * boards.size(0)
+
+        epoch_train_loss = running_loss / n_train
+
+        model.eval()
+        valid_loss = 0.0
+        with torch.no_grad():
+            for boards, targets in valid_loader:
+                boards = boards.to(device)
+                targets = targets.to(device)
+                outputs = model(boards)
+                loss = criterion(outputs, targets)
+                valid_loss += loss.item() * boards.size(0)
+
+        epoch_valid_loss = valid_loss / n_valid
+
+        print(
+            f"Epoch [{epoch}/{EPOCHS}]  "
+            f"Train Loss: {epoch_train_loss:.4f}  "
+            f"Valid Loss: {epoch_valid_loss:.4f}"
+        )
+
+    model.eval()
+    test_loss = 0.0
+    with torch.no_grad():
+        for boards, targets in test_loader:
+            boards = boards.to(device)
+            targets = targets.to(device)
+            outputs = model(boards)
+            loss = criterion(outputs, targets)
+            test_loss += loss.item() * boards.size(0)
+
+    test_loss /= n_test
+    print(f"\nTest Loss: {test_loss:.4f}")

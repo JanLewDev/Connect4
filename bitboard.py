@@ -9,8 +9,8 @@ class BitBoard:
     winning_length: int
     move_history: list[int]
     bitboard: list[int]
-    __counter: int
-    __heights: list[int]  # current height
+    counter: int
+    heights: list[int]  # current height
     zobrist_table: list[list[list[int]]]
 
     def __init__(self, height: int = 6, width: int = 7, winning_length: int = 4) -> None:
@@ -18,40 +18,40 @@ class BitBoard:
         self.width = width
         self.winning_length = winning_length
         self.move_history = []
-        self.__counter = 0
+        self.counter = 0
         self.bitboard = [0] * 2  # We always have two players
         # positions of the next possible move in each column
-        self.__heights = [i * (height + 1) for i in range(width)]
+        self.heights = [i * (height + 1) for i in range(width)]
         self.shifts = [1, self.height, self.height + 1, self.height + 2]
         # Initialize Zobrist table: [player(0/1)][col][row]
         self.zobrist_table = [[[random.getrandbits(64) for _ in range(
             height)] for _ in range(width)] for _ in range(2)]
         self.current_hash = 0
-        assert len(self.__heights) == width
+        assert len(self.heights) == width
 
     def make_move(self, col: int) -> None:
         """Make a move in the column."""
         # assert 0 <= col < self.width
-        row = self.__heights[col] - col * (self.height + 1)
+        row = self.heights[col] - col * (self.height + 1)
         player = self.turn()
         # Update bitboard
-        _move: int = 1 << self.__heights[col]
+        _move: int = 1 << self.heights[col]
         self.bitboard[player] ^= _move
         # Update Zobrist hash
         self.current_hash ^= self.zobrist_table[player][col][row]
-        self.__heights[col] += 1
+        self.heights[col] += 1
         self.move_history.append(col)
-        self.__counter += 1
+        self.counter += 1
 
     def undo_move(self) -> None:
         """Undo the last move."""
         col = self.move_history.pop()
-        self.__counter -= 1
-        self.__heights[col] -= 1
+        self.counter -= 1
+        self.heights[col] -= 1
         # Determine row index after undo (the position we remove)
-        row = self.__heights[col] - col * (self.height + 1)
+        row = self.heights[col] - col * (self.height + 1)
         player = self.turn()
-        _move: int = 1 << self.__heights[col]
+        _move: int = 1 << self.heights[col]
         self.bitboard[player] ^= _move
 
         # Update Zobrist hash
@@ -76,19 +76,19 @@ class BitBoard:
         """List all possible moves."""
         moves = []
         for col in range(self.width):
-            if not self.__top_mask(col) & (1 << self.__heights[col]):
+            if not self.__top_mask(col) & (1 << self.heights[col]):
                 moves.append(col)
         return moves
 
     def is_terminal(self) -> tuple[bool, int]:
         """Check if the board is terminal and return the last move's player."""
         return self.is_winning() or \
-            self.__counter == self.height * \
+            self.counter == self.height * \
             self.width, (self.turn() ^ 1)  # self.turn()?
 
     def turn(self) -> int:
         """Return the current player."""
-        return self.__counter & 1
+        return self.counter & 1
 
     def __top_mask(self, col: int) -> int:
         """Return the top mask for the column."""
