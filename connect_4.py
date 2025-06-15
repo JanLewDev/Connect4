@@ -15,7 +15,7 @@ class Game:
     n_columns: int
     winning_length: int
     board: list[list[int]]
-    move_history: list[tuple[int, int]]
+    move_history: list[int]
     current_player: int
     bitboard: BitBoard
 
@@ -119,7 +119,7 @@ class Game:
     def set_bitboard(self) -> None:
         """Set the bitboard from the board."""
         for _move in self.move_history:
-            self.bitboard.make_move(_move[0])
+            self.bitboard.make_move(_move)
 
 
 class Player:
@@ -279,10 +279,14 @@ class Player:
         best_move = None
         async for _move in self.iterative_deepening(_game):
             best_move = _move
+
+        assert best_move is not None
+        _game.move_history.append(best_move)
         return best_move
 
     def make_move(self, _game: Game) -> int | None:
         """Makes the async move."""
-        # TODO
+        _game.bitboard = BitBoard(
+            height=_game.n_rows, width=_game.n_columns, winning_length=_game.winning_length)
         _game.set_bitboard()
         return asyncio.run(self.make_move_async(_game))

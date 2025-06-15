@@ -6,87 +6,91 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from bitboard import BitBoard
 from typing import List, Tuple
 
+
 class Connect4Dataset(Dataset):
-  """Dataset generated using random simulations"""
-  def __init__(self, num_samples: int, playouts_per_position: int, height: int = 7, width: int = 7, winning_length: int = 4):
-    self.num_samples = num_samples
-    self.positions = []
-    self.labels = []
-    self.playouts= playouts_per_position
-    self.height = height
-    self.width = width
-    self.winning_length = winning_length
-    self.generate_data()
+    """Dataset generated using random simulations"""
 
-  def generate_data(self):
-    for _ in range(self.num_samples):
-      game = BitBoard(self.height, self.width, self.winning_length)
+    def __init__(self, num_samples: int, playouts_per_position: int, height: int = 7, width: int = 7, winning_length: int = 4):
+        self.num_samples = num_samples
+        self.positions = []
+        self.labels = []
+        self.playouts = playouts_per_position
+        self.height = height
+        self.width = width
+        self.winning_length = winning_length
+        self.generate_data()
 
-      # Generate random board
-      n_moves = random.randint(0, self.height * self.width)
-      for _ in range(n_moves):
-        is_terminal, _ = game.is_terminal()
-        if is_terminal:
-          break
-        legal_moves = game.list_moves()
-        if not legal_moves:
-          break
-        move_to_apply = random.choice(legal_moves)
-        game.make_move(move_to_apply)
+    def generate_data(self):
+        for _ in range(self.num_samples):
+            game = BitBoard(self.height, self.width, self.winning_length)
 
-      # Get features
-      features = self.board_to_tensor(game.bitboard)
-      self.positions.append(features)
+            # Generate random board
+            n_moves = random.randint(0, self.height * self.width)
+            for _ in range(n_moves):
+                is_terminal, _ = game.is_terminal()
+                if is_terminal:
+                    break
+                legal_moves = game.list_moves()
+                if not legal_moves:
+                    break
+                move_to_apply = random.choice(legal_moves)
+                game.make_move(move_to_apply)
 
-      # Get label
-      score = 0.0
-      for _ in range(self.playouts):
-        result = self.simulate_random_game(game)
-        score += result
-      label = score / self.playouts
-      self.labels.append(label)
+            # Get features
+            features = self.board_to_tensor(game.bitboard)
+            self.positions.append(features)
 
-  def simulate_random_game(self, game: BitBoard) -> float:
-    game_clone = BitBoard(self.height, self.width, self.winning_length)
-    game_clone.bitboard[0] = game.bitboard[0]
-    game_clone.bitboard[1] = game.bitboard[1]
-    game_clone.move_history = game.move_history
-    game_clone.heights = game.heights
-    game_clone.counter = game.counter
+            # Get label
+            score = 0.0
+            for _ in range(self.playouts):
+                result = self.simulate_random_game(game)
+                score += result
+            label = score / self.playouts
+            self.labels.append(label)
 
-    while True:
-      is_terminal, winner = game_clone.is_terminal()
-      if is_terminal:
-        if winner == 0:
-          return 1.0
-        elif winner == 1:
-          return -1.0
-        else:
-          return 0.0
-      legal_moves = game_clone.list_moves()
-      if not legal_moves:
-        return 0.0
-      move = random.choice(legal_moves)
-      game_clone.make_move(move)
-      
+    def simulate_random_game(self, game: BitBoard) -> float:
+        game_clone = BitBoard(self.height, self.width, self.winning_length)
+        game_clone.bitboard[0] = game.bitboard[0]
+        game_clone.bitboard[1] = game.bitboard[1]
+        game_clone.move_history = game.move_history
+        game_clone.heights = game.heights
+        game_clone.counter = game.counter
 
-  def board_to_tensor(self, bitboards: List[int]) -> torch.Tensor:
-    """Converts two bitboards into two tensors with dimensions 2 x H x W"""
-    H = self.height
-    W = self.width
-    board_tensor = torch.zeros((2, H, W), dtype=torch.float32)
-    for player in (0, 1):
-      bb = bitboards[player]
-      for col in range(H):
-        for row in range(W):
-          bit_pos = col * (H + 1) + row
-          if (1 << bit_pos) & bb:
-            board_tensor[player, row, col] = 1.0
-    return board_tensor
-  def __len__(self) -> int:
-    return self.num_samples
-  def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-    return self.positions[idx], torch.tensor(self.labels[idx])
+        while True:
+            is_terminal, winner = game_clone.is_terminal()
+            if is_terminal:
+                if winner == 0:
+                    return 1.0
+                elif winner == 1:
+                    return -1.0
+                else:
+                    return 0.0
+            legal_moves = game_clone.list_moves()
+            if not legal_moves:
+                return 0.0
+            move = random.choice(legal_moves)
+            game_clone.make_move(move)
+
+    def board_to_tensor(self, bitboards: List[int]) -> torch.Tensor:
+        """Converts two bitboards into two tensors with dimensions 2 x H x W"""
+        H = self.height
+        W = self.width
+        board_tensor = torch.zeros((2, H, W), dtype=torch.float32)
+        for player in (0, 1):
+            bb = bitboards[player]
+            for col in range(H):
+                for row in range(W):
+                    bit_pos = col * (H + 1) + row
+                    if (1 << bit_pos) & bb:
+                        board_tensor[player, row, col] = 1.0
+        return board_tensor
+
+    def __len__(self) -> int:
+        return self.num_samples
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.positions[idx], torch.tensor(self.labels[idx])
+
 
 class Connect4NN(nn.Module):
 
@@ -120,23 +124,24 @@ class Connect4NN(nn.Module):
         zwraca tensor o kształcie (batch_size,), z wartościami w [-1,1].
         """
 
-        x = self.conv1(x) 
+        x = self.conv1(x)
         x = self.bn1(x)
         x = nn.functional.relu(x)
 
-        x = self.conv2(x)         
+        x = self.conv2(x)
         x = self.bn2(x)
         x = nn.functional.relu(x)
 
-        x = x.view(x.size(0), -1)  
+        x = x.view(x.size(0), -1)
 
-        x = self.fc1(x)             
+        x = self.fc1(x)
         x = nn.functional.relu(x)
         x = self.dropout(x)
 
-        x = self.fc2(x)             
-        x = self.tanh(x)            
+        x = self.fc2(x)
+        x = self.tanh(x)
         return x.squeeze(1)
+
 
 if __name__ == "__main__":
     NUM_SAMPLES = 10000
@@ -168,7 +173,7 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True)
     valid_loader = DataLoader(valid_set, batch_size=BATCH_SIZE)
-    test_loader  = DataLoader(test_set,  batch_size=BATCH_SIZE)
+    test_loader = DataLoader(test_set,  batch_size=BATCH_SIZE)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = Connect4NN(height=6, width=7).to(device)
@@ -179,11 +184,11 @@ if __name__ == "__main__":
         model.train()
         running_loss = 0.0
         for boards, targets in train_loader:
-            boards = boards.to(device)      
-            targets = targets.to(device)    
+            boards = boards.to(device)
+            targets = targets.to(device)
 
             optimizer.zero_grad()
-            outputs = model(boards)         
+            outputs = model(boards)
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
