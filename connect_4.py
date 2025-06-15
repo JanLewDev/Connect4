@@ -176,9 +176,9 @@ class Player:
         if depth == 0 or _is_terminal:
             if _is_terminal:
                 if _turn == 0:
-                    return INT_MAX-1, None
+                    return INT_MAX - depth, None
                 if _turn == 1:
-                    return INT_MIN+1, None
+                    return INT_MIN + depth, None
                 return 0, None
             score = _game.eval()
             # Store in transposition table
