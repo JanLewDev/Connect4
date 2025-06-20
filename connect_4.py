@@ -112,8 +112,7 @@ class Game:
                 elif K >= 3 and o_bits == K - 3 and empty == 3:
                     player1_threats += 1
 
-        score = (p0_potential_lines - p1_potential_lines) + \
-            2 * (player1_threats - player0_threats)
+        score = (p0_potential_lines - p1_potential_lines) +  (player1_threats - player0_threats)
         return score
 
     def set_bitboard(self) -> None:
@@ -176,9 +175,9 @@ class Player:
         if depth == 0 or _is_terminal:
             if _is_terminal:
                 if _turn == 0:
-                    return INT_MAX - depth, None
+                    return INT_MAX - (self.max_depth - depth), None
                 if _turn == 1:
-                    return INT_MIN + depth, None
+                    return INT_MIN + (self.max_depth - depth), None
                 return 0, None
             score = _game.eval()
             # Store in transposition table
@@ -200,9 +199,6 @@ class Player:
                 finally:
                     _game.bitboard.undo_move()
 
-                if depth == self.max_depth:
-                    print("Ruch:", move, "Ocena ruchu:",
-                          new_value, "| player X")
                 if new_value > value:
                     value = new_value
                     best_move = move
@@ -230,10 +226,6 @@ class Player:
                         _game, depth - 1, alpha, beta, True, start_time, time_limit)
                 finally:
                     _game.bitboard.undo_move()
-
-                if depth == self.max_depth:
-                    print("Ruch:", move, "Ocena ruchu:",
-                          new_value, "| player O")
                 if new_value < value:
                     value = new_value
                     best_move = move
@@ -250,7 +242,7 @@ class Player:
                 value, depth, flag, best_move)
             return value, best_move
 
-    async def iterative_deepening(self, _game: Game) -> AsyncGenerator[int | None]:
+    async def iterative_deepening(self, _game: Game):
         """Iterative Deepening: incrementally increase depth."""
         self.__explored_nodes = 0
         best_move_overall = None
@@ -268,7 +260,7 @@ class Player:
             if best_move is not None:
                 best_move_overall = best_move
 
-            print(f"Depth {depth}: Best Move = {best_move}, Score = {value}")
+            print(f"Depth {depth}: Best Move = {best_move}, Score = {value}, Player = {_game.current_player}")
 
             yield best_move_overall
 
