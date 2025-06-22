@@ -260,7 +260,7 @@ class Player:
             if best_move is not None:
                 best_move_overall = best_move
 
-            print(f"Depth {depth}: Best Move = {best_move}, Score = {value}, Player = {_game.current_player}")
+            print(f"Depth {depth}: Best Move = {best_move}, Score = {value}")
 
             yield best_move_overall
 
